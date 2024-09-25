@@ -42,7 +42,7 @@ st.title('HK Squash League 2024/25 Schedule ICS Generator')
 st.markdown("""<br>""", unsafe_allow_html=True)
 
 # Write instructions
-st.write("This app allows you to generate a calendar file for the fixture schedule of your team that you can import into your calendar of choice.")
+st.write("This app allows you to generate a calendar file for your team's fixtures that you can import into your calendar of choice.")
 
 # Select division
 selected_division = st.selectbox('Select Division', division)
