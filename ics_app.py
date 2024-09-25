@@ -36,7 +36,7 @@ division = division.sort_values()
 division = division.tolist()
 
 # Create title with space below
-st.title('HK Squash League 2024/25 Schedule ICS Generator')
+st.title('HK Squash League 2024/25 Calendar Generator')
 
 # Add a page break without a line
 st.markdown("""<br>""", unsafe_allow_html=True)
