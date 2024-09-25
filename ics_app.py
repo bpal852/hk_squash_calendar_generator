@@ -7,7 +7,7 @@ import pandas as pd
 # Load the data
 @st.cache_data
 def load_data():
-    df = pd.read_csv('C:/Users/bpali/Downloads/PYTHON/Squash/create_calendar/schedules_24_25.csv')
+    df = pd.read_csv('schedules_24_25.csv')
     return df
 
 df = load_data()
