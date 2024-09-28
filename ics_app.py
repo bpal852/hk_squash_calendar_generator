@@ -4,11 +4,19 @@ from datetime import datetime, timedelta
 import pytz
 import pandas as pd
 
+# Set Streamlit page configuration
+st.set_page_config(
+    page_title="HK Squash League 2024/25 Schedule ICS Generator",
+    page_icon="📅"
+)
+
+
 # Load the data
 @st.cache_data
 def load_data():
-    df = pd.read_csv('C:/Users/bpali/Downloads/PYTHON/Squash/create_calendar/schedules_24_25.csv')
+    df = pd.read_csv('schedules_24_25.csv')
     return df
+
 
 df = load_data()
 
