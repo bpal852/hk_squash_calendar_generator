@@ -84,6 +84,7 @@ def abbreviate_team_name(team_name):
         'Hong Kong Cricket Club': 'HKCC',
         'Kowloon Cricket Club': 'KCC',
         'Ladies Recreation Club': 'LRC',
+        'United Services Recreation Club': 'USRC',
     }
     for full_name, abbreviation in abbreviations.items():
         team_name = team_name.replace(full_name, abbreviation)
