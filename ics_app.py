@@ -6,7 +6,7 @@ import pandas as pd
 
 # Set Streamlit page configuration
 st.set_page_config(
-    page_title="HK Squash League 2024/25 Schedule ICS Generator",
+    page_title="HK Squash League Calendar Generator",
     page_icon="📅"
 )
 
@@ -55,7 +55,7 @@ st.write("This app allows you to generate a calendar file for your team's fixtur
 # Select division
 selected_division = st.selectbox('Select Division', division)
 
-#### Team Selection
+# Team Selection
 # Filter dataframe to the selected division
 df_division = df[df['Division'] == selected_division]
 
@@ -77,6 +77,18 @@ team_schedule = df_division[
     (df_division['Away Team'] != '[BYE]')
 ]
 
+# Define abbreviation function
+def abbreviate_team_name(team_name):
+    abbreviations = {
+        'Hong Kong Football Club': 'HKFC',
+        'Hong Kong Cricket Club': 'HKCC',
+        'Kowloon Cricket Club': 'KCC',
+        'Ladies Recreation Club': 'LRC',
+    }
+    for full_name, abbreviation in abbreviations.items():
+        team_name = team_name.replace(full_name, abbreviation)
+    return team_name
+
 # Generate the ICS file
 if team_schedule.empty:
     st.warning("No schedule found for the selected team.")
@@ -92,20 +104,27 @@ else:
         date_str = row['Date']
         time_str = row['Time']
 
+        # Abbreviate the team names
+        home_team_abbrev = abbreviate_team_name(home_team)
+        away_team_abbrev = abbreviate_team_name(away_team)
+        selected_team_abbrev = abbreviate_team_name(selected_team)
+
         # Determine if the selected team is the home team or away team
         if selected_team == home_team:
             opponent = away_team
-            event.name = f'{selected_team} vs {opponent}'
+            opponent_abbrev = away_team_abbrev
+            event.name = f'{selected_team_abbrev} vs {opponent_abbrev}'
         else:
             opponent = home_team
-            event.name = f'{selected_team} @ {opponent}'
+            opponent_abbrev = home_team_abbrev
+            event.name = f'{selected_team_abbrev} @ {opponent_abbrev}'
 
         # Parse the date and time, and localize it to the specified timezone
         try:
             naive_datetime = datetime.strptime(f'{date_str} {time_str}', "%d/%m/%Y %H:%M")
             localized_datetime = timezone.localize(naive_datetime)
         except ValueError:
-            st.error(f"Error parsing date or time for match: {home_team} vs {away_team} on {date_str} {time_str}")
+            st.error(f"Error parsing date or time for match: {home_team_abbrev} vs {away_team_abbrev} on {date_str} {time_str}")
             continue
 
         # Set beginning and end of the event
@@ -142,6 +161,9 @@ st.markdown("""<br>""", unsafe_allow_html=True)
 team_schedule['Opponent'] = team_schedule.apply(
     lambda row: row['Away Team'] if row['Home Team'] == selected_team else row['Home Team'], axis=1
 )
+
+# Abbreviate team names in the 'Opponent' column
+team_schedule['Opponent'] = team_schedule['Opponent'].apply(abbreviate_team_name)
 
 # Select only the relevant columns (Date, Opponent, Venue)
 schedule_to_display = team_schedule[['Date', 'Opponent', 'Venue']]
