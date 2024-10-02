@@ -104,6 +104,7 @@ else:
         venue = row['Venue']
         date_str = row['Date']
         time_str = row['Time']
+        division = row['Division']
 
         # Abbreviate the team names
         home_team_abbrev = abbreviate_team_name(home_team)
@@ -134,11 +135,9 @@ else:
 
         # Set the location and description of the event
         event.location = venue
-        if selected_team == home_team:
-            event.description = f'Squash match for {selected_team} vs {opponent}'
-        else:
-            event.description = f'Squash match for {selected_team} @ {opponent}'
+        event.description = f'Division: {division}'
 
+        # Add the event to the calendar
         cal.events.add(event)
 
         # Convert the calendar to a string
