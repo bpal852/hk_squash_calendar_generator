@@ -3,6 +3,28 @@ from ics import Calendar, Event
 from datetime import datetime, timedelta
 import pytz
 import pandas as pd
+import re
+from pathlib import Path
+
+REPO_ROOT = Path(__file__).parent
+DEFAULT_CSV = REPO_ROOT / "combined_schedules_25_26.csv"
+
+def parse_local_dt(date_str, time_str, tz):
+    d = str(date_str).strip()
+    t = str(time_str).strip()
+
+    # Convert "19:00:00" -> "19:00"
+    if re.fullmatch(r"\d{1,2}:\d{2}:\d{2}", t):
+        t = t[:5]
+
+    # Allow "7:00" as well as "07:00"
+    for fmt in ("%d/%m/%Y %H:%M", "%d/%m/%Y %H:%M:%S"):
+        try:
+            naive = datetime.strptime(f"{d} {t}", fmt)
+            return tz.localize(naive)
+        except ValueError:
+            pass
+    return None
 
 # Set Streamlit page configuration
 st.set_page_config(
@@ -10,15 +32,14 @@ st.set_page_config(
     page_icon="📅"
 )
 
-
 # Load the data
 @st.cache_data
-def load_data():
-    df = pd.read_csv('schedules_24_25.csv')
+def load_data(csv_path: Path):
+    df = pd.read_csv(csv_path)
     return df
 
-
-df = load_data()
+# File input
+df = load_data(Path(DEFAULT_CSV))
 
 # Define the timezone you want to use
 timezone = pytz.timezone('Asia/Hong_Kong')
@@ -27,8 +48,8 @@ timezone = pytz.timezone('Asia/Hong_Kong')
 # Division Selection
 
 # Define the order of the divisions
-custom_order = ['Premier Main', '2', '3', '4', '5', '6', '7A', '7B', '8A', '8B', '9', '10', 
-                '11', '12', '13A', '13B', '14', '15A', '15B', 'Premier Masters', 'M2', 'M3', 
+custom_order = ['Premier Main', '2', '3', '4', '5', '6', '7', '8A', '8B', '9', '10', 
+                '11', '12', '13A', '13B', '13C','14', '15A', '15B', 'Premier Masters', 'M2', 'M3', 
                 'M4', 'Premier Ladies', 'L2', 'L3', 'L4']
 
 # Extract unique division
@@ -44,7 +65,7 @@ division = division.sort_values()
 division = division.tolist()
 
 # Create title with space below
-st.title('HK Squash League 2024/25 Calendar Generator')
+st.title('HK Squash League 2025/26 Calendar Generator')
 
 # Add a page break without a line
 st.markdown("""<br>""", unsafe_allow_html=True)
@@ -57,7 +78,7 @@ selected_division = st.selectbox('Select Division', division)
 
 # Team Selection
 # Filter dataframe to the selected division
-df_division = df[df['Division'] == selected_division]
+df_division = df[df['Division'] == selected_division].copy()
 
 # Get unique teams from 'Home Team' and 'Away Team'
 teams = pd.unique(pd.concat([df_division['Home Team'], df_division['Away Team']]))
@@ -75,7 +96,7 @@ team_schedule = df_division[
         (df_division['Away Team'] == selected_team)
     ) &
     (df_division['Away Team'] != '[BYE]')
-]
+].copy()
 
 # Define abbreviation function
 def abbreviate_team_name(team_name):
@@ -102,9 +123,11 @@ else:
         home_team = row['Home Team']
         away_team = row['Away Team']
         venue = row['Venue']
-        date_str = row['Date']
-        time_str = row['Time']
-        division = row['Division']
+        date_str = str(row['Date']).strip()
+        print(date_str)
+        time_str = str(row['Time']).strip()
+        print(time_str)
+        division_name = row['Division']
 
         # Abbreviate the team names
         home_team_abbrev = abbreviate_team_name(home_team)
@@ -122,26 +145,29 @@ else:
             event.name = f'{selected_team_abbrev} @ {opponent_abbrev}'
 
         # Parse the date and time, and localize it to the specified timezone
-        try:
-            naive_datetime = datetime.strptime(f'{date_str} {time_str}', "%d/%m/%Y %H:%M")
-            localized_datetime = timezone.localize(naive_datetime)
-        except ValueError:
-            st.error(f"Error parsing date or time for match: {home_team_abbrev} vs {away_team_abbrev} on {date_str} {time_str}")
+        start = parse_local_dt(date_str, time_str, timezone)
+        if start is None:
+            st.error(f"Unrecognized date/time: {date_str} {time_str} ({home_team_abbrev} vs {away_team_abbrev})")
             continue
 
         # Set beginning and end of the event
-        event.begin = localized_datetime
-        event.end = localized_datetime + timedelta(hours=2.5)
+        event.begin = start
+        event.end = start + timedelta(hours=2.5)
 
         # Set the location and description of the event
         event.location = venue
-        event.description = f'Division: {division}'
+        event.description = f'Division: {division_name}'
 
         # Add the event to the calendar
         cal.events.add(event)
 
-        # Convert the calendar to a string
-        ics_content = cal.serialize()
+    # Ensure at least one valid event
+    if len(cal.events) == 0:
+        st.error("None of this team's fixtures had a valid date/time, so the calendar is empty.")
+        st.stop()
+
+    # Convert the calendar to a string
+    ics_content = cal.serialize()
 
 # Add a page break without a line
 st.markdown("""<br>""", unsafe_allow_html=True)
