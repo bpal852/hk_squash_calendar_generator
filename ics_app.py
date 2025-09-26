@@ -5,6 +5,8 @@ import pytz
 import pandas as pd
 import re
 from pathlib import Path
+import numpy as np
+import urllib.parse
 
 REPO_ROOT = Path(__file__).parent
 DEFAULT_CSV = REPO_ROOT / "combined_schedules_25_26.csv"
@@ -73,33 +75,13 @@ st.markdown("""<br>""", unsafe_allow_html=True)
 # Write instructions
 st.write("This app allows you to generate a calendar file for your team's fixtures that you can import into your calendar of choice.")
 
-# Select division
-selected_division = st.selectbox('Select Division', division)
+# ---------------------------
+# Division + Team selection IN A FORM
+# ---------------------------
 
-# Team Selection
-# Filter dataframe to the selected division
-df_division = df[df['Division'] == selected_division].copy()
-
-# Get unique teams from 'Home Team' and 'Away Team'
-teams = pd.unique(pd.concat([df_division['Home Team'], df_division['Away Team']]))
-
-# Discard 'Bye' from the list of teams
-teams = [team for team in teams if team != '[BYE]']
-teams = sorted(teams)
-
-# Team selection
-selected_team = st.selectbox('Select Team', teams)
-# Filter schedule for the selected team
-team_schedule = df_division[
-    (
-        (df_division['Home Team'] == selected_team) |
-        (df_division['Away Team'] == selected_team)
-    ) &
-    (df_division['Away Team'] != '[BYE]')
-].copy()
-
-# Define abbreviation function
-def abbreviate_team_name(team_name):
+def abbreviate_team_name(team_name: str) -> str:
+    """Replace long club names with abbreviations."""
+    team_name = str(team_name)
     abbreviations = {
         'Hong Kong Football Club': 'HKFC',
         'Hong Kong Cricket Club': 'HKCC',
@@ -107,117 +89,132 @@ def abbreviate_team_name(team_name):
         'Ladies Recreation Club': 'LRC',
         'United Services Recreation Club': 'USRC',
     }
-    for full_name, abbreviation in abbreviations.items():
-        team_name = team_name.replace(full_name, abbreviation)
+    for full, short in abbreviations.items():
+        team_name = team_name.replace(full, short)
     return team_name
 
-# Generate the ICS file
-if team_schedule.empty:
-    st.warning("No schedule found for the selected team.")
-    st.stop()
-else:
+
+# Build the sorted division list (you already did this above)
+divisions = division  # reuse your existing 'division' list from earlier steps
+
+with st.form("generate_form"):
+    # 1) Pick division
+    selected_division = st.selectbox("Select Division", divisions, key="division")
+
+    # 2) Build team list based on picked division
+    df_division = df[df["Division"] == selected_division].copy()
+    teams = pd.unique(pd.concat([df_division["Home Team"], df_division["Away Team"]]))
+    teams = [t for t in teams if t != "[BYE]"]
+    teams = sorted(teams)
+
+    # 3) Pick team
+    selected_team = st.selectbox("Select Team", teams, key="team")
+
+    # 4) Submit to generate ICS
+    submitted = st.form_submit_button("Generate calendar")
+
+if submitted:
+    # Filter schedule for the selected team
+    team_schedule = df_division[
+        (
+            (df_division["Home Team"] == selected_team) |
+            (df_division["Away Team"] == selected_team)
+        ) &
+        (df_division["Away Team"] != "[BYE]")
+    ].copy()
+
+    from ics import Calendar, Event
     cal = Calendar()
+
+    # Build events
     for _, row in team_schedule.iterrows():
         event = Event()
 
-        home_team = row['Home Team']
-        away_team = row['Away Team']
-        venue = row['Venue']
-        date_str = str(row['Date']).strip()
-        print(date_str)
-        time_str = str(row['Time']).strip()
-        print(time_str)
-        division_name = row['Division']
+        home_team = row["Home Team"]
+        away_team = row["Away Team"]
+        venue     = str(row["Venue"]).strip()
+        date_str  = str(row["Date"]).strip()
+        time_str  = str(row["Time"]).strip()
+        division_name = row["Division"]
 
-        # Abbreviate the team names
-        home_team_abbrev = abbreviate_team_name(home_team)
-        away_team_abbrev = abbreviate_team_name(away_team)
-        selected_team_abbrev = abbreviate_team_name(selected_team)
+        # Abbreviate names
+        home_abbrev = abbreviate_team_name(home_team)
+        away_abbrev = abbreviate_team_name(away_team)
+        me_abbrev   = abbreviate_team_name(selected_team)
 
-        # Determine if the selected team is the home team or away team
+        # Title: home vs away or away @ home
         if selected_team == home_team:
-            opponent = away_team
-            opponent_abbrev = away_team_abbrev
-            event.name = f'{selected_team_abbrev} vs {opponent_abbrev}'
+            opponent_abbrev = away_abbrev
+            event.name = f"{me_abbrev} vs {opponent_abbrev}"
         else:
-            opponent = home_team
-            opponent_abbrev = home_team_abbrev
-            event.name = f'{selected_team_abbrev} @ {opponent_abbrev}'
+            opponent_abbrev = home_abbrev
+            event.name = f"{me_abbrev} @ {opponent_abbrev}"
 
-        # Parse the date and time, and localize it to the specified timezone
-        start = parse_local_dt(date_str, time_str, timezone)
-        if start is None:
-            st.error(f"Unrecognized date/time: {date_str} {time_str} ({home_team_abbrev} vs {away_team_abbrev})")
+        # Parse date/time robustly (handles HH:MM and HH:MM:SS)
+        # If you already added a helper, call it here instead.
+        try:
+            try:
+                naive_dt = datetime.strptime(f"{date_str} {time_str}", "%d/%m/%Y %H:%M:%S")
+            except ValueError:
+                naive_dt = datetime.strptime(f"{date_str} {time_str}", "%d/%m/%Y %H:%M")
+            start = timezone.localize(naive_dt)
+        except ValueError:
+            st.error(f"Error parsing date/time: {home_abbrev} vs {away_abbrev} on {date_str} {time_str}")
             continue
 
-        # Set beginning and end of the event
         event.begin = start
-        event.end = start + timedelta(hours=2.5)
+        event.end   = start + timedelta(hours=2.5)
+        event.location    = venue
+        event.description = f"Division: {division_name}"
+        # Optional: add a stable UID to avoid duplicates on import
+        event.uid = f"hk-squash-{me_abbrev}-{opponent_abbrev}-{start:%Y%m%dT%H%M%z}"
 
-        # Set the location and description of the event
-        event.location = venue
-        event.description = f'Division: {division_name}'
-
-        # Add the event to the calendar
         cal.events.add(event)
 
-    # Ensure at least one valid event
     if len(cal.events) == 0:
         st.error("None of this team's fixtures had a valid date/time, so the calendar is empty.")
-        st.stop()
+    else:
+        # --- iPhone-friendly: store BYTES in session_state and render button immediately ---
+        ics_bytes = cal.serialize().encode("utf-8")
+        st.session_state["ics_bytes"] = ics_bytes
+        st.session_state["ics_filename"] = f'{selected_team}_fixtures.ics'.replace(' ', '_').lower()
 
-    # Convert the calendar to a string
-    ics_content = cal.serialize()
+# ---------------------------
+# Download area (outside the form)
+# ---------------------------
+if "ics_bytes" in st.session_state:
+    st.download_button(
+        label="**Download Schedule**",
+        data=st.session_state["ics_bytes"],   # BYTES, not str
+        file_name=st.session_state["ics_filename"],
+        mime="text/calendar",
+        key="dl_ics"  # stable key prevents stale ephemeral URL on iOS
+    )
 
-# Add a page break without a line
-st.markdown("""<br>""", unsafe_allow_html=True)
+    # Optional iPhone fallback (data: URI)
+    ics_text = st.session_state["ics_bytes"].decode("utf-8")
+    data_uri = "data:text/calendar;charset=utf-8," + urllib.parse.quote(ics_text)
+    st.markdown(f"[Open in Calendar (fallback)]({data_uri})", unsafe_allow_html=True)
 
-# Provide download option
-st.download_button(
-    label='**Download Schedule**',
-    data=ics_content,
-    file_name=f'{selected_team}_fixtures.ics'.replace(' ', '_').lower(),
-    mime='text/calendar'
-)
+# ---------------------------
+# (Optional) Fixture list display below — this doesn’t create widgets, so won’t re-run
+# ---------------------------
+if submitted and len(cal.events) > 0:
+    # Build a lightweight display frame without mutating team_schedule
+    opponent = np.where(
+        team_schedule["Home Team"].eq(selected_team),
+        team_schedule["Away Team"],
+        team_schedule["Home Team"]
+    )
+    schedule_to_display = pd.DataFrame({
+        "Date": team_schedule["Date"].values,
+        "Opponent": pd.Series(opponent).map(abbreviate_team_name),
+        "Venue": team_schedule["Venue"].values,
+    }).reset_index(drop=True)
 
-# Add a page break without a line
-st.markdown("""<br>""", unsafe_allow_html=True)
-
-# Create an opponent column based on home/away team
-team_schedule['Opponent'] = team_schedule.apply(
-    lambda row: row['Away Team'] if row['Home Team'] == selected_team else row['Home Team'], axis=1
-)
-
-# Abbreviate team names in the 'Opponent' column
-team_schedule['Opponent'] = team_schedule['Opponent'].apply(abbreviate_team_name)
-
-# Select only the relevant columns (Date, Opponent, Venue)
-schedule_to_display = team_schedule[['Date', 'Opponent', 'Venue']]
-
-# Reset index and drop the original index
-schedule_to_display = schedule_to_display.reset_index(drop=True)
-
-# Use the to_html method to render the table without the index
-schedule_html = schedule_to_display.to_html(index=False)
-
-# Add custom CSS for left-aligning the headers
-schedule_html = schedule_html.replace('<th>', '<th style="text-align: left;">')
-
-if not team_schedule.empty:
     st.markdown(f"### Fixture List for {selected_team}")
-    st.markdown(schedule_html, unsafe_allow_html=True)
+    st.dataframe(schedule_to_display, use_container_width=True)
 
-# Add a page break without a line
-st.markdown("""<br>""", unsafe_allow_html=True)
-
-# Add a page break without a line
-st.markdown("""<br>""", unsafe_allow_html=True)
-
-# Add a page break
-st.markdown("""---""")
-
-# Add a page break without a line
-st.markdown("""<br>""", unsafe_allow_html=True)
 
 # Add instructions to import the ICS file in different calendars
 st.markdown("""
